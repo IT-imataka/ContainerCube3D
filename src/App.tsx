@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Edges, Grid, OrbitControls, Text } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -94,8 +94,8 @@ const FACE_SIZE:Record<FaceKey,[number,number]> = {
 	back:[WIDTH, HEIGHT],
 	top :[WIDTH,DEPTH],
 	bottom :[WIDTH,DEPTH],
-	right :[HEIGHT,DEPTH],
-	left :[HEIGHT,DEPTH],
+	right :[DEPTH,HEIGHT],
+	left :[DEPTH,HEIGHT],
 }
 
 // 各面の見出し = その情報を得るための docker コマンド
@@ -119,7 +119,7 @@ type MonoProps = {
 };
 
 function faceEdges(face: FaceKey) { 
-	const [w,h] = FACE_COMMANDS[face];
+	const [w,h] = FACE_SIZE[face];
 	return{
 		left: -w / 2 + PAD,
 		right: w /2 - PAD,
@@ -156,14 +156,15 @@ function Mono({
 
 function Face({ face, children }: { face: FaceKey; children?: React.ReactNode }) {
   const { position, rotation } = FACE_TRANSFORMS[face];
+	const e = faceEdges(face);
   return (
     <group position={position} rotation={rotation}>
-      <Mono position={[-HALF + PAD, HALF - PAD, 0]} size={0.085} color={C.dim}>
+      <Mono position={[e.left, e.top, 0]} size={0.085} color={C.dim}>
         {FACE_COMMANDS[face]}
       </Mono>
       {/* 見出し下のライン */}
       <mesh position={[0, HALF - PAD - 0.17, 0]}>
-        <planeGeometry args={[SIZE - PAD * 2, 0.006]} />
+        <planeGeometry args={[e.inner, 0.006]} />
         <meshBasicMaterial color={C.dim} />
       </mesh>
       {children}
@@ -201,24 +202,25 @@ function StatusIndicator({ position }: { position: [number, number, number] }) {
 
 function FrontFace({ data }: { data: ContainerInfo }) {
   const running = data.status === "running";
+	const e = faceEdges("front");
   return (
     <Face face="front">
-      <Mono position={[-HALF + PAD, 0.55, 0]} size={0.09} color={C.dim}>
+      <Mono position={[e.left, 0.55, 0]} size={0.09} color={C.dim}>
         NAME
       </Mono>
-      <Mono position={[-HALF + PAD, 0.4, 0]} size={0.23} maxWidth={SIZE - PAD * 2}>
+      <Mono position={[e.left, 0.4, 0]} size={0.23} maxWidth={SIZE - PAD * 2}>
         {data.name}
       </Mono>
-      <StatusIndicator position={[-HALF + PAD + 0.07, -0.25, 0.07]} />
+      <StatusIndicator position={[e.left + 0.07, -0.25, 0.07]} />
       <Mono
-        position={[-HALF + PAD + 0.24, -0.25, 0]}
+        position={[e.left + 0.24, -0.25, 0]}
         size={0.13}
         anchorY="middle"
         color={running ? C.phosphor : C.red}
       >
         {running ? "running" : data.status}
       </Mono>
-      <Mono position={[-HALF + PAD, -HALF + PAD + 0.1, 0]} size={0.08} color={C.dim}>
+      <Mono position={[e.left, -HALF + PAD + 0.1, 0]} size={0.08} color={C.dim}>
         {`id ${data.id}  ·  drag to inspect other faces`}
       </Mono>
     </Face>
@@ -272,22 +274,23 @@ function LeftFace({ data }: { data: ContainerInfo }) {
 }
 
 function Meter({ y, label, value, ratio }: { y: number; label: string; value: string; ratio: number }) {
-  const width = SIZE - PAD * 2;
+  const width = SIZE2 - PAD * 2;
   const r = THREE.MathUtils.clamp(ratio, 0, 1);
   const segments = 24;
   const filled = Math.round(r * segments);
   const segW = width / segments;
+	const e = faceEdges("top");
   return (
     <group>
-      <Mono position={[-HALF + PAD, y, 0]} size={0.09} color={C.dim}>
+      <Mono position={[e.left, y, 0]} size={0.09} color={C.dim}>
         {label}
       </Mono>
-      <Mono position={[HALF - PAD, y + 0.02, 0]} size={0.19} anchorX="right">
+      <Mono position={[e.right, y + 0.02, 0]} size={0.19} anchorX="right">
         {value}
       </Mono>
       {/* セグメント式メーター（ターミナルの ▮▮▮▯▯ 風） */}
       {Array.from({ length: segments }).map((_, i) => (
-        <mesh key={i} position={[-HALF + PAD + segW * i + segW / 2, y - 0.32, 0]}>
+        <mesh key={i} position={[e.left + segW * i + segW / 2, y - 0.32, 0]}>
           <planeGeometry args={[segW * 0.7, 0.12]} />
           <meshBasicMaterial
             color={i < filled ? C.phosphor : C.dim}
@@ -326,6 +329,7 @@ function parseLog(line: string) {
 
 function BackFace({ data }: { data: ContainerInfo }) {
   const logs = data.logs.map(parseLog);
+	const e = faceEdges("back");
   return (
     <Face face="back">
       {logs.map((log, i) => {
@@ -333,14 +337,14 @@ function BackFace({ data }: { data: ContainerInfo }) {
         const color = LEVEL_COLOR[log.level] ?? C.phosphor;
         return (
           <group key={i}>
-            <Mono position={[-HALF + PAD, y, 0]} size={0.09} color={C.dim}>
+            <Mono position={[e.left, y, 0]} size={0.09} color={C.dim}>
               {log.time}
             </Mono>
-            <Mono position={[-HALF + PAD + 0.62, y, 0]} size={0.09} color={color}>
+            <Mono position={[e.left + 0.62, y, 0]} size={0.09} color={color}>
               {`[${log.level}]`}
             </Mono>
             <Mono
-              position={[-HALF + PAD, y - 0.15, 0]}
+              position={[e.left, y - 0.15, 0]}
               size={0.14}
               color={log.level === "INFO" ? "#8fbfa5" : color}
               maxWidth={SIZE - PAD * 2}
@@ -423,15 +427,17 @@ function CameraRig({
 }) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
-  const cur = useMemo(() => new THREE.Spherical(), []);
-  const tgt = useMemo(() => new THREE.Spherical(), []);
-  const v = useMemo(() => new THREE.Vector3(), []);
+	const curRef = useRef(new THREE.Spherical());
+	const tgtRef = useRef(new THREE.Spherical());
+	const vRef = useRef(new THREE.Vector3());
 
   useFrame((_, delta) => {
     if (!target) return;
+		const cur = curRef.current;
     cur.setFromVector3(camera.position);
+		const tgt = tgtRef.current;
+		const v = vRef.current;
     tgt.setFromVector3(v.set(...target));
-
     // theta は最短方向に回す（箱を突き抜けないよう直線補間ではなく球面上を移動）
     const dTheta = Math.atan2(Math.sin(tgt.theta - cur.theta), Math.cos(tgt.theta - cur.theta));
     const dPhi = tgt.phi - cur.phi;
@@ -463,17 +469,28 @@ const FACE_BUTTONS: { key: keyof typeof FACE_VIEWS; label: string; hint: string 
   { key: "back", label: "logs", hint: "背面" },
 ];
 
+// OS の「視差効果を減らす」設定を購読する（設定を途中で変えても追従する）
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void) {
+  const mq = window.matchMedia(REDUCED_MOTION_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+function usePrefersReducedMotion() {
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+    () => false, // SSR 用（このアプリでは使われない）
+  );
+}
+
 export default function ContainerCube3D() {
   const [autoRotate, setAutoRotate] = useState(true);
   const [target, setTarget] = useState<[number, number, number] | null>(null);
   const [active, setActive] = useState<keyof typeof FACE_VIEWS | null>("front");
-  const [reducedMotion, setReducedMotion] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReducedMotion(mq.matches);
-    if (mq.matches) setAutoRotate(false);
-  }, []);
+  const reducedMotion = usePrefersReducedMotion();
 
   const goTo = (key: keyof typeof FACE_VIEWS) => {
     setAutoRotate(false);
